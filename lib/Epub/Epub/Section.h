@@ -128,20 +128,23 @@ class Section {
   std::string getTextFromSectionFile();
 
   // Resolve an anchor from the in-progress build first, then the on-disk anchor map
-  // (covers finalized sections and partials from a previous session).
-  std::optional<uint16_t> findAnchor(const std::string& anchor) const;
+  // (covers finalized sections and partials from a previous session). When outY is
+  // non-null, it receives the page-relative Y of the anchored line.
+  std::optional<uint16_t> findAnchor(const std::string& anchor, uint16_t* outY = nullptr) const;
 
   // True if this spine's unzipped HTML is already cached, so a build won't pay the (multi-second on a
   // giant spine) zip inflation. Lets the reader skip the indexing popup on a fast reopen/rebuild.
   bool hasHtmlCache() const;
 
   // Look up the page number for an anchor id from the section cache file.
-  std::optional<uint16_t> getPageForAnchor(const std::string& anchor) const;
+  // When outY is non-null, it receives the page-relative Y of the anchored line.
+  std::optional<uint16_t> getPageForAnchor(const std::string& anchor, uint16_t* outY = nullptr) const;
 
   // Look up an anchor among the pages built so far by the in-progress build, so an anchor jump
   // (TOC / chapter select, usually the chapter top = page 0) can resolve without laying out the
   // whole chapter. Returns nullopt if the anchor hasn't been reached yet (build more) or no build.
-  std::optional<uint16_t> findAnchorDuringBuild(const std::string& anchor) const;
+  // When outY is non-null, it receives the page-relative Y of the anchored line.
+  std::optional<uint16_t> findAnchorDuringBuild(const std::string& anchor, uint16_t* outY = nullptr) const;
 
   // Get the page count from the section cache file without fully loading it.
   std::optional<uint16_t> getCachedPageCount() const;

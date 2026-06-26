@@ -138,6 +138,7 @@ bool Page::serialize(HalFile& file) const {
       LOG_ERR("PGE", "Failed to write footnote");
       return false;
     }
+    serialization::writePod(file, fn.yPos);
   }
 
   return true;
@@ -188,6 +189,7 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
     }
     entry.number[sizeof(entry.number) - 1] = '\0';
     entry.href[sizeof(entry.href) - 1] = '\0';
+    serialization::readPod(file, entry.yPos);
   }
 
   return page;

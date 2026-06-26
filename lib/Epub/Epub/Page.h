@@ -77,13 +77,14 @@ class Page {
   std::vector<FootnoteEntry> footnotes;
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
 
-  void addFootnote(const char* number, const char* href) {
+  void addFootnote(const char* number, const char* href, const uint16_t yPos) {
     if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return;  // Cap per-page footnotes
     FootnoteEntry entry;
     strncpy(entry.number, number, sizeof(entry.number) - 1);
     entry.number[sizeof(entry.number) - 1] = '\0';
     strncpy(entry.href, href, sizeof(entry.href) - 1);
     entry.href[sizeof(entry.href) - 1] = '\0';
+    entry.yPos = yPos;
     footnotes.push_back(entry);
   }
 

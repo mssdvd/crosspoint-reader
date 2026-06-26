@@ -11,8 +11,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-// v28: text decoration bits now include line-through in serialized wordStyles.
-constexpr uint8_t SECTION_FILE_VERSION = 28;
+// v29: anchor map entries and per-page footnote entries each gain a Y field
+// (definition-line / reference-line Y) for the footnote target-line highlight.
+constexpr uint8_t SECTION_FILE_VERSION = 29;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -433,21 +434,24 @@ bool Section::hasHtmlCache() const {
   return Storage.exists(htmlPath.c_str());
 }
 
-std::optional<uint16_t> Section::findAnchorDuringBuild(const std::string& anchor) const {
+std::optional<uint16_t> Section::findAnchorDuringBuild(const std::string& anchor, uint16_t* outY) const {
   if (!build_ || !build_->parser) return std::nullopt;
-  for (const auto& [key, page] : build_->parser->getAnchors()) {
-    if (key == anchor) return page;
+  for (const auto& record : build_->parser->getAnchors()) {
+    if (record.id == anchor) {
+      if (outY) *outY = record.y;
+      return record.page;
+    }
   }
   return std::nullopt;
 }
 
-std::optional<uint16_t> Section::findAnchor(const std::string& anchor) const {
-  if (const auto page = findAnchorDuringBuild(anchor)) {
+std::optional<uint16_t> Section::findAnchor(const std::string& anchor, uint16_t* outY) const {
+  if (const auto page = findAnchorDuringBuild(anchor, outY)) {
     return page;
   }
   // Fall back to the on-disk anchor map: a finalized section, or a partial whose map
   // covers everything up to its watermark (nullopt past it -- build further and retry).
-  return getPageForAnchor(anchor);
+  return getPageForAnchor(anchor, outY);
 }
 
 uint16_t Section::estimatedTotalPages() const {
@@ -522,14 +526,15 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
   const uint32_t anchorMapOffset = file.position();
   const auto& anchors = build_->parser->getAnchors();
   uint16_t anchorCount = 0;
-  for (const auto& [anchor, page] : anchors) {
-    if (!asPartial || page < builtPageCount_) anchorCount++;
+  for (const auto& anchor : anchors) {
+    if (!asPartial || anchor.page < builtPageCount_) anchorCount++;
   }
   serialization::writePod(file, anchorCount);
-  for (const auto& [anchor, page] : anchors) {
-    if (asPartial && page >= builtPageCount_) continue;
-    serialization::writeString(file, anchor);
-    serialization::writePod(file, page);
+  for (const auto& anchor : anchors) {
+    if (asPartial && anchor.page >= builtPageCount_) continue;
+    serialization::writeString(file, anchor.id);
+    serialization::writePod(file, anchor.page);
+    serialization::writePod(file, anchor.y);
   }
 
   const uint32_t paragraphLutOffset = file.position();
@@ -771,7 +776,7 @@ std::optional<uint16_t> Section::getCachedPageCount() const {
   return count;
 }
 
-std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) const {
+std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor, uint16_t* outY) const {
   HalFile f;
   if (!Storage.openFileForRead("SCT", filePath, f)) {
     return std::nullopt;
@@ -791,9 +796,12 @@ std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) con
   for (uint16_t i = 0; i < count; i++) {
     std::string key;
     uint16_t page;
+    uint16_t y;
     serialization::readString(f, key);
     serialization::readPod(f, page);
+    serialization::readPod(f, y);
     if (key == anchor) {
+      if (outY) *outY = y;
       return page;
     }
   }

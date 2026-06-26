@@ -54,10 +54,21 @@ class EpubReaderActivity final : public Activity {
   struct SavedPosition {
     int spineIndex;
     int pageNumber;
+    // Page-relative Y of the footnote reference line, to highlight on return.
+    int16_t referenceY;
   };
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
   int footnoteDepth = 0;
+
+  // Footnote target-line highlight: two black bars drawn at the sides of the
+  // anchored line (definition on jump, reference on return) that auto-hide.
+  // Page-relative top Y of the line to highlight; -1 = inactive.
+  int16_t footnoteHighlightY = -1;
+  bool footnoteHighlightVisible = false;  // bars currently on screen
+  unsigned long footnoteHighlightTime = 0UL;
+  void drawFootnoteHighlightBars(int orientedMarginTop, int orientedMarginLeft, int orientedMarginRight);
+  void clearFootnoteHighlight();
 
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);

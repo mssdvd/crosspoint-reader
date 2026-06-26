@@ -90,21 +90,22 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 28
+### Version 29
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
 
-Version 28 includes:
+Version 29 includes:
 
 - cache-busting fields for paragraph alignment, hyphenation, embedded CSS,
   image rendering mode, and Focus Reading
 - page offset LUT
-- anchor-to-page map for fragment and footnote navigation
+- anchor-to-page map for fragment and footnote navigation, with the
+  page-relative Y of each anchored line (footnote target-line highlight)
 - paragraph and list-item LUTs used by KOReader sync page refinement
 - optional per-word Focus Reading split metadata
-- per-page footnote entries
+- per-page footnote entries, each carrying the Y of its reference line
 - serialized word style bits for underline, strikethrough, superscript, and
   subscript
 
@@ -115,7 +116,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 28
+#define EXPECTED_VERSION 29
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
@@ -230,6 +231,7 @@ struct PageElement {
 struct FootnoteEntry {
     char number[FOOTNOTE_NUMBER_LEN];
     char href[FOOTNOTE_HREF_LEN];
+    u16 yPos [[comment("Page-relative Y of the footnote reference line")]];
 };
 
 struct Page {
@@ -243,6 +245,7 @@ struct Page {
 struct AnchorEntry {
     String anchor;
     u16 page;
+    u16 y [[comment("Page-relative Y of the anchored line")]];
 };
 
 struct AnchorMap {

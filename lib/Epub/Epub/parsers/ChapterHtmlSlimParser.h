@@ -81,9 +81,15 @@ class ChapterHtmlSlimParser {
   int tableRowIndex = 0;
   int tableColIndex = 0;
 
-  // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
+  // Anchor-to-page mapping: tracks which page (and page-relative Y of the anchored
+  // line) each HTML id attribute lands on. The Y is used to highlight the target line.
   int completedPageCount = 0;
-  std::vector<std::pair<std::string, uint16_t>> anchorData;
+  struct AnchorRecord {
+    std::string id;
+    uint16_t page;
+    uint16_t y;
+  };
+  std::vector<AnchorRecord> anchorData;
   std::string pendingAnchorId;          // deferred until after previous text block is flushed
   std::vector<std::string> tocAnchors;  // the list of anchors that are TOC chapter boundaries
   uint16_t xpathParagraphIndex = 0;
@@ -95,6 +101,14 @@ class ChapterHtmlSlimParser {
   FootnoteEntry currentFootnote = {};
   int currentFootnoteLinkTextLen = 0;
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
+  // IDs on navigable inline elements (e.g. <a id>): their target line, hence Y, is only
+  // known once the enclosing block is laid out, so resolve them per-line like footnotes
+  // rather than via the block-level deferred flush (which lands on the next block).
+  std::vector<std::pair<int, std::string>> pendingLineAnchors;  // <wordIndex, anchorId>
+  // IDs on block elements (e.g. <div id>, <p id>): resolve to the first line of that block
+  // once it is laid out, so the page/Y reflect the post-page-break position. Recording the
+  // pre-layout cursor would strand the anchor on the previous page near the status bar.
+  std::vector<std::string> pendingFirstLineAnchors;
   int wordsExtractedInBlock = 0;
 
   // Resumable parse state. The one-shot parseAndBuildPages() drives these
@@ -172,7 +186,7 @@ class ChapterHtmlSlimParser {
   void abortParse();   // tear down without flushing (error / abandon)
 
   void addLineToPage(std::shared_ptr<TextBlock> line);
-  const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  const std::vector<AnchorRecord>& getAnchors() const { return anchorData; }
 
   // Byte progress of the in-flight parse, used to estimate a still-building section's total page
   // count (a giant single-spine book never fully lays out, so its real count is unknown). Valid

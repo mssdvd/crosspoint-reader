@@ -378,6 +378,12 @@ void EpubReaderActivity::loop() {
     }
   }
 
+  // Auto-hide the footnote target-line bars; re-render erases them.
+  if (footnoteHighlightVisible && (millis() - footnoteHighlightTime) >= ReaderUtils::FOOTNOTE_HIGHLIGHT_DURATION_MS) {
+    clearFootnoteHighlight();
+    requestUpdate();
+  }
+
   // Enter reader menu activity on short-press Confirm. A long-press that fired a bound
   // function (bookmark or KOReader sync) sets ignoreNextConfirmRelease so the release
   // following the hold does not also open the menu.
@@ -827,6 +833,8 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  // Paging away invalidates any pending footnote line highlight.
+  clearFootnoteHighlight();
   if (isForwardTurn) {
     // Advance within the section while there are (or may still be) more pages: either a built
     // page ahead, or the section is still building (windowed), in which case more pages exist
@@ -1046,10 +1054,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
     if (!pendingAnchor.empty()) {
       // Resolve from the pages laid out so far and/or the on-disk map (finalized or partial).
-      const auto page = section->findAnchor(pendingAnchor);
-      if (page) {
+      uint16_t anchorY = 0;
+      if (const auto page = section->findAnchor(pendingAnchor, &anchorY)) {
         section->currentPage = *page;
-        LOG_DBG("ERS", "Resolved anchor '%s' to page %d", pendingAnchor.c_str(), *page);
+        footnoteHighlightY = static_cast<int16_t>(anchorY);
+        footnoteHighlightVisible = false;
+        LOG_DBG("ERS", "Resolved anchor '%s' to page %d, y %d", pendingAnchor.c_str(), *page, anchorY);
       } else {
         LOG_DBG("ERS", "Anchor '%s' not found in section %d", pendingAnchor.c_str(), currentSpineIndex);
       }
@@ -1167,6 +1177,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
   }
+
+  // Overlay the footnote target-line bars on top of the freshly rendered page.
+  drawFootnoteHighlightBars(orientedMarginTop, orientedMarginLeft, orientedMarginRight);
+
   saveProgress(currentSpineIndex, section->currentPage, section->estimatedTotalPages());
 
   showPendingSyncSaveError();
@@ -1428,12 +1442,55 @@ void EpubReaderActivity::openCurrentPageFootnotes() {
   }
 }
 
+void EpubReaderActivity::drawFootnoteHighlightBars(const int orientedMarginTop, const int orientedMarginLeft,
+                                                   const int orientedMarginRight) {
+  // Draw once per arming. Re-renders within the visible window (e.g. returning from
+  // the menu, or a chapter jump) must not repaint the bars at a now-stale position.
+  if (footnoteHighlightY < 0 || footnoteHighlightVisible) return;
+
+  // Short vertical bars flanking the anchored line, just outside the text column.
+  constexpr int BAR_WIDTH = 6;
+  constexpr int BAR_GAP = 4;
+
+  const int fontId = SETTINGS.getReaderFontId();
+  const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * SETTINGS.getReaderLineCompression() + 0.5f);
+  const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
+
+  const int top = std::clamp(orientedMarginTop + footnoteHighlightY, 0, std::max(0, screenHeight - lineHeight));
+  const int leftX = std::max(0, orientedMarginLeft - BAR_GAP - BAR_WIDTH);
+  const int rightX = std::min(screenWidth - BAR_WIDTH, screenWidth - orientedMarginRight + BAR_GAP);
+
+  renderer.fillRect(leftX, top, BAR_WIDTH, lineHeight, true);
+  renderer.fillRect(rightX, top, BAR_WIDTH, lineHeight, true);
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+
+  footnoteHighlightVisible = true;
+  footnoteHighlightTime = millis();
+}
+
+void EpubReaderActivity::clearFootnoteHighlight() {
+  footnoteHighlightY = -1;
+  footnoteHighlightVisible = false;
+}
+
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
   if (!epub) return;
 
-  // Push current position onto saved stack
+  // Clear any prior highlight; render() re-arms the definition line if the anchor resolves.
+  clearFootnoteHighlight();
+
+  // Push current position onto saved stack. Record the Y of the footnote reference
+  // line (matched by href) so the bars can highlight it again on return.
   if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
-    savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage};
+    int16_t referenceY = -1;
+    for (const auto& fn : currentPageFootnotes) {
+      if (hrefStr == fn.href) {
+        referenceY = static_cast<int16_t>(fn.yPos);
+        break;
+      }
+    }
+    savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage, referenceY};
     footnoteDepth++;
     LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d", footnoteDepth, currentSpineIndex, section->currentPage);
   }
@@ -1482,6 +1539,9 @@ void EpubReaderActivity::restoreSavedPosition() {
     RenderLock lock(*this);
     currentSpineIndex = pos.spineIndex;
     nextPageNumber = pos.pageNumber;
+    // Highlight the footnote reference line on the restored page.
+    footnoteHighlightY = pos.referenceY;
+    footnoteHighlightVisible = false;
     section.reset();
   }
   requestUpdate();
